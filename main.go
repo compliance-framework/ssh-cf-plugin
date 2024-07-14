@@ -9,6 +9,7 @@ import (
 
 	. "github.com/compliance-framework/assessment-runtime/provider"
 	"github.com/google/uuid"
+	"gopkg.in/yaml.v2"
 )
 
 type SSHCommandProvider struct {
@@ -17,35 +18,35 @@ type SSHCommandProvider struct {
 
 // SSHConfig contains the SSH connection configuration
 type SSHConfig struct {
-	User     string
-	Password string
-	Host     string
-	Port     string
+	Username string  `json:"username" yaml:"username"`
+	Password string  `json:"password" yaml:"password"`
+	Host     string  `json:"host" yaml:"host"`
+	Command  string  `json:"command" yaml:"command"`
+	Port     string  `json:"port,omitempty" yaml:"port,omitempty"`
 }
 
 func (p *SSHCommandProvider) Evaluate(input *EvaluateInput) (*EvaluateResult, error) {
-	username, ok := input.Configuration["username"]
+	var ssh_config SSHConfig
+
+	yamlString, ok := input.Configuration["yaml"]
+	log.Printf("yamlString: %s", yamlString)
+
+    err := yaml.Unmarshal([]byte(yamlString), &ssh_config)
+    if err != nil {
+        return nil, fmt.Errorf("Error unmarshalling YAML: %v\n", err)
+    }
 	if !ok {
-		return nil, fmt.Errorf("username parameter is missing")
+		return nil, fmt.Errorf("yaml parameter is missing")
 	}
-	// TODO: Get this from an env var, as it gets stored in the mongodb otherwise.
-	_, ok = input.Configuration["password"]
-	if !ok {
-		return nil, fmt.Errorf("password parameter is missing")
+
+	username := ssh_config.Username
+	host := ssh_config.Host
+	command := ssh_config.Command
+	port := ssh_config.Port
+	if port == "" {
+		port = "22" // default to 22 if no port supplied
 	}
-	host, ok := input.Configuration["host"]
-	if !ok {
-		return nil, fmt.Errorf("host parameter is missing")
-	}
-	command, ok := input.Configuration["command"]
-	if !ok {
-		return nil, fmt.Errorf("command parameter is missing")
-	}
-	port, ok := input.Configuration["port"]
-	if !ok {
-		// default to 22 if no port supplied
-		port = "22"
-	}
+
 	// There is only one subject, so create one
 	subjects := make([]*Subject, 0)
 	ssh_target_id := fmt.Sprintf("%s@%s:%s %s", username, host, port, command)
@@ -65,33 +66,25 @@ func (p *SSHCommandProvider) Evaluate(input *EvaluateInput) (*EvaluateResult, er
 }
 
 func (p SSHCommandProvider) Execute(input *ExecuteInput) (*ExecuteResult, error) {
+	var ssh_config SSHConfig
 	start_time := time.Now().Format(time.RFC3339)
-	username, ok := input.Configuration["username"]
+
+	yamlString, ok := input.Configuration["yaml"]
 	if !ok {
-		return nil, fmt.Errorf("username parameter is missing")
+		return nil, fmt.Errorf("yaml parameter is missing")
 	}
-	password, ok := input.Configuration["password"]
-	if !ok {
-		return nil, fmt.Errorf("password parameter is missing")
-	}
-	host, ok := input.Configuration["host"]
-	if !ok {
-		return nil, fmt.Errorf("host parameter is missing")
-	}
-	command, ok := input.Configuration["command"]
-	if !ok {
-		return nil, fmt.Errorf("command parameter is missing")
-	}
-	port, ok := input.Configuration["port"]
-	if !ok {
-		// default to 22 if no port supplied
-		port = "22"
-	}
-	config := SSHConfig{
-		User:     username,
-		Password: password,
-		Host:     host,
-		Port:     port,
+
+    err := yaml.Unmarshal([]byte(yamlString), &ssh_config)
+    if err != nil {
+        return nil, fmt.Errorf("Error unmarshalling YAML: %v\n", err)
+    }
+
+	username := ssh_config.Username
+	host := ssh_config.Host
+	command := ssh_config.Command
+	port := ssh_config.Port
+	if port == "" {
+		port = "22" // default to 22 if no port supplied
 	}
 
 	var obs *Observation
@@ -104,7 +97,7 @@ func (p SSHCommandProvider) Execute(input *ExecuteInput) (*ExecuteResult, error)
 	ssh_target_command := fmt.Sprintf("ssh -p %s %s@%s %s", port, username, host, command)
 
 	// Run the command and get the output
-	output, exit_code, err := RunCommand(config, command)
+	output, exit_code, err := RunCommand(ssh_config)
 	if err != nil {
 		log.Fatalf("Failed to run command: %v", err)
 	}
@@ -183,10 +176,10 @@ func (p SSHCommandProvider) Execute(input *ExecuteInput) (*ExecuteResult, error)
 }
 
 // RunCommand executes a command on the remote server over SSH and returns the output
-func RunCommand(config SSHConfig, command string) (string, int, error) {
+func RunCommand(config SSHConfig) (string, int, error) {
 	// Define the SSH client configuration
 	sshConfig := &ssh.ClientConfig{
-		User: config.User,
+		User: config.Username,
 		Auth: []ssh.AuthMethod{
 		    ssh.Password(config.Password),
 		},
@@ -209,7 +202,7 @@ func RunCommand(config SSHConfig, command string) (string, int, error) {
 	defer session.Close()
 
 	// Execute the command and capture the output
-	output, err := session.CombinedOutput(command)
+	output, err := session.CombinedOutput(config.Command)
 	exit_code := -1
 	if err != nil {
 		if exitErr, ok := err.(*ssh.ExitError); ok {

@@ -6,6 +6,7 @@ require (
 	github.com/compliance-framework/assessment-runtime v0.0.0-20240707093522-9f150d08df50
 	github.com/google/uuid v1.6.0
 	golang.org/x/crypto v0.25.0
+	gopkg.in/yaml.v2 v2.4.0
 )
 
 require (
