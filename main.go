@@ -3,12 +3,11 @@ package main
 import (
 	"fmt"
 	"log"
-	"golang.org/x/crypto/ssh"
-
 	"time"
 
 	. "github.com/compliance-framework/assessment-runtime/provider"
 	"github.com/google/uuid"
+	"golang.org/x/crypto/ssh"
 	"gopkg.in/yaml.v2"
 )
 
@@ -18,11 +17,12 @@ type SSHCommandProvider struct {
 
 // SSHConfig contains the SSH connection configuration
 type SSHConfig struct {
-	Username string  `json:"username" yaml:"username"`
-	Password string  `json:"password" yaml:"password"`
-	Host     string  `json:"host" yaml:"host"`
-	Command  string  `json:"command" yaml:"command"`
-	Port     string  `json:"port,omitempty" yaml:"port,omitempty"`
+	Username string `json:"username" yaml:"username"`
+	Password string `json:"password" yaml:"password"`
+	Host     string `json:"host" yaml:"host"`
+	Command  string `json:"command" yaml:"command"`
+	Pem      string `json:"pem" yaml:"pem"`
+	Port     string `json:"port,omitempty" yaml:"port,omitempty"`
 }
 
 func (p *SSHCommandProvider) Evaluate(input *EvaluateInput) (*EvaluateResult, error) {
@@ -31,10 +31,10 @@ func (p *SSHCommandProvider) Evaluate(input *EvaluateInput) (*EvaluateResult, er
 	yamlString, ok := input.Configuration["yaml"]
 	log.Printf("yamlString: %s", yamlString)
 
-    err := yaml.Unmarshal([]byte(yamlString), &ssh_config)
-    if err != nil {
-        return nil, fmt.Errorf("Error unmarshalling YAML: %v\n", err)
-    }
+	err := yaml.Unmarshal([]byte(yamlString), &ssh_config)
+	if err != nil {
+		return nil, fmt.Errorf("error unmarshalling YAML: %v", err)
+	}
 	if !ok {
 		return nil, fmt.Errorf("yaml parameter is missing")
 	}
@@ -74,10 +74,10 @@ func (p SSHCommandProvider) Execute(input *ExecuteInput) (*ExecuteResult, error)
 		return nil, fmt.Errorf("yaml parameter is missing")
 	}
 
-    err := yaml.Unmarshal([]byte(yamlString), &ssh_config)
-    if err != nil {
-        return nil, fmt.Errorf("Error unmarshalling YAML: %v\n", err)
-    }
+	err := yaml.Unmarshal([]byte(yamlString), &ssh_config)
+	if err != nil {
+		return nil, fmt.Errorf("error unmarshalling YAML: %v", err)
+	}
 
 	username := ssh_config.Username
 	host := ssh_config.Host
@@ -102,16 +102,16 @@ func (p SSHCommandProvider) Execute(input *ExecuteInput) (*ExecuteResult, error)
 		log.Fatalf("Failed to run command: %v", err)
 	}
 
-	if (exit_code != 0) {
+	if exit_code != 0 {
 		// observation and finding
 		obs = &Observation{
-			Id:               obs_id,
-			Title:            "SSH Command Did Not Succeed",
-			Description:      fmt.Sprintf("The command: %s did not succeed.", ssh_target_command),
-			Collected:        time.Now().Format(time.RFC3339),
-			Expires:          time.Now().AddDate(0, 1, 0).Format(time.RFC3339), // Add one month for the expiration
-			Links:            []*Link{},
-			Props:            []*Property{
+			Id:          obs_id,
+			Title:       "SSH Command Did Not Succeed",
+			Description: fmt.Sprintf("The command: %s did not succeed.", ssh_target_command),
+			Collected:   time.Now().Format(time.RFC3339),
+			Expires:     time.Now().AddDate(0, 1, 0).Format(time.RFC3339), // Add one month for the expiration
+			Links:       []*Link{},
+			Props: []*Property{
 				{
 					Name:  "Command",
 					Value: fmt.Sprintf("%s", ssh_target_command),
@@ -122,7 +122,7 @@ func (p SSHCommandProvider) Execute(input *ExecuteInput) (*ExecuteResult, error)
 					Description: fmt.Sprintf("The command returned an exit code of %d for the command: %s", exit_code, ssh_target_command),
 				},
 			},
-			Remarks:          fmt.Sprintf("The command: '%s' should return a zero exit code.", ssh_target_command),
+			Remarks: fmt.Sprintf("The command: '%s' should return a zero exit code.", ssh_target_command),
 		}
 		fndngs = &Finding{
 			Id:                  uuid.New().String(),
@@ -175,15 +175,34 @@ func (p SSHCommandProvider) Execute(input *ExecuteInput) (*ExecuteResult, error)
 	}, nil
 }
 
+func LoadPrivateKeyFromConfig(config SSHConfig) (ssh.Signer, error) {
+	// Convert the PEM string into bytes and parse it
+	key := []byte(config.Pem)
+
+	// Parse the private key
+	signer, err := ssh.ParsePrivateKey(key)
+	if err != nil {
+		return nil, fmt.Errorf("unable to parse private key: %v", err)
+	}
+
+	return signer, nil
+}
+
 // RunCommand executes a command on the remote server over SSH and returns the output
 func RunCommand(config SSHConfig) (string, int, error) {
-	// Define the SSH client configuration
+
+	// Load the private key from the config
+	signer, err := LoadPrivateKeyFromConfig(config)
+	if err != nil {
+		log.Fatalf("Failed to load private key: %v", err)
+	}
+
 	sshConfig := &ssh.ClientConfig{
 		User: config.Username,
 		Auth: []ssh.AuthMethod{
-		    ssh.Password(config.Password),
+			ssh.PublicKeys(signer),
 		},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // For simplicity, ignore host key verification
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // Insecure: For testing only, consider verifying host key
 	}
 
 	// Establish the SSH connection
@@ -206,7 +225,7 @@ func RunCommand(config SSHConfig) (string, int, error) {
 	exit_code := -1
 	if err != nil {
 		if exitErr, ok := err.(*ssh.ExitError); ok {
-		    exit_code = exitErr.ExitStatus()
+			exit_code = exitErr.ExitStatus()
 		} else {
 			return "", -1, fmt.Errorf("failed to execute command: %v", err)
 		}
