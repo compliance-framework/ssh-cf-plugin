@@ -4,13 +4,10 @@ permissions:
   contents: read
 
 on:
-  push:
-    branches:
-      - main
-      - seed
-    tags:
-      - v*
-  pull_request:
+  workflow_run:
+    workflows: ["Plugin CI"]
+    types:
+      - completed
 
 jobs:
   publish:
