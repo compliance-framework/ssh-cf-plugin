@@ -71,6 +71,8 @@ func (p *SSHCommandProvider) Execute(input *ExecuteInput) (*ExecuteResult, error
 		return nil, fmt.Errorf("RunCommand function is not set")
 	}
 
+	start_time := time.Now().Format(time.RFC3339)
+
 	var ssh_config SSHConfig
 
 	yamlString, ok := input.Configuration["yaml"]
@@ -100,11 +102,25 @@ func (p *SSHCommandProvider) Execute(input *ExecuteInput) (*ExecuteResult, error
 			Description: fmt.Sprintf("The command: %s did not succeed.", ssh_target_command),
 			Collected:   time.Now().Format(time.RFC3339),
 			Expires:     time.Now().AddDate(0, 1, 0).Format(time.RFC3339),
+			Links:       []*Link{},
+			Props: []*Property{
+				{
+					Name:  "Command",
+					Value: ssh_target_command,
+				},
+			},
+			RelevantEvidence: []*Evidence{
+				{
+					Description: fmt.Sprintf("The com`mand returned an exit code of %d for the command: %s", exit_code, ssh_target_command),
+				},
+			},
+			Remarks: fmt.Sprintf("The command: '%s' should return a zero exit code.", ssh_target_command),
 		})
 		findings = append(findings, &Finding{
 			Id:                  uuid.New().String(),
 			Title:               "SSH Command Failure",
 			Description:         fmt.Sprintf("The command %s did not succeed, and produced output: %s.", ssh_target_command, output),
+			Remarks:             fmt.Sprintf("Correct the command %s.", ssh_target_command),
 			RelatedObservations: []string{obs_id},
 		})
 	} else {
@@ -114,13 +130,35 @@ func (p *SSHCommandProvider) Execute(input *ExecuteInput) (*ExecuteResult, error
 			Description: fmt.Sprintf("The command: %s succeeded.", ssh_target_command),
 			Collected:   time.Now().Format(time.RFC3339),
 			Expires:     time.Now().AddDate(0, 1, 0).Format(time.RFC3339),
+			Links:       []*Link{},
+			Props: []*Property{
+				{
+					Name:  "Command",
+					Value: ssh_target_command,
+				},
+			},
+			RelevantEvidence: []*Evidence{
+				{
+					Description: fmt.Sprintf("The command returned an exit code of %d for the command: %s", exit_code, ssh_target_command),
+				},
+			},
+			Remarks: "All OK.",
 		})
+	}
+
+	// Log that the check has successfully run
+	logEntry := &LogEntry{
+		Title:       "SSH Command Check",
+		Description: "SSH command check has run successfully",
+		Start:       start_time,
+		End:         time.Now().Format(time.RFC3339),
 	}
 
 	return &ExecuteResult{
 		Status:       ExecutionStatus_SUCCESS,
 		Observations: observations,
 		Findings:     findings,
+		Logs:         []*LogEntry{logEntry},
 	}, nil
 }
 
