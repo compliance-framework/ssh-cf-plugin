@@ -12,7 +12,8 @@ import (
 )
 
 type SSHCommandProvider struct {
-	message string
+	message    string
+	RunCommand func(SSHConfig) (string, int, error)
 }
 
 // SSHConfig contains the SSH connection configuration
@@ -44,7 +45,7 @@ func (p *SSHCommandProvider) Evaluate(input *EvaluateInput) (*EvaluateResult, er
 	command := ssh_config.Command
 	port := ssh_config.Port
 	if port == "" {
-		port = "22" // default to 22 if no port supplied
+		port = "22" // default to 22 if no port supplied``
 	}
 
 	// There is only one subject, so create one
@@ -65,9 +66,12 @@ func (p *SSHCommandProvider) Evaluate(input *EvaluateInput) (*EvaluateResult, er
 	}, nil
 }
 
-func (p SSHCommandProvider) Execute(input *ExecuteInput) (*ExecuteResult, error) {
+func (p *SSHCommandProvider) Execute(input *ExecuteInput) (*ExecuteResult, error) {
+	if p.RunCommand == nil {
+		return nil, fmt.Errorf("RunCommand function is not set")
+	}
+
 	var ssh_config SSHConfig
-	start_time := time.Now().Format(time.RFC3339)
 
 	yamlString, ok := input.Configuration["yaml"]
 	if !ok {
@@ -79,99 +83,44 @@ func (p SSHCommandProvider) Execute(input *ExecuteInput) (*ExecuteResult, error)
 		return nil, fmt.Errorf("error unmarshalling YAML: %v", err)
 	}
 
-	username := ssh_config.Username
-	host := ssh_config.Host
-	command := ssh_config.Command
-	port := ssh_config.Port
-	if port == "" {
-		port = "22" // default to 22 if no port supplied
+	output, exit_code, err := p.RunCommand(ssh_config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to run command: %v", err)
 	}
-
-	var obs *Observation
-	var fndngs *Finding
 
 	observations := []*Observation{}
 	findings := []*Finding{}
-
 	obs_id := uuid.New().String()
-	ssh_target_command := fmt.Sprintf("ssh -p %s %s@%s %s", port, username, host, command)
-
-	// Run the command and get the output
-	output, exit_code, err := RunCommand(ssh_config)
-	if err != nil {
-		log.Fatalf("Failed to run command: %v", err)
-	}
+	ssh_target_command := fmt.Sprintf("ssh -p %s %s@%s %s", ssh_config.Port, ssh_config.Username, ssh_config.Host, ssh_config.Command)
 
 	if exit_code != 0 {
-		// observation and finding
-		obs = &Observation{
+		observations = append(observations, &Observation{
 			Id:          obs_id,
 			Title:       "SSH Command Did Not Succeed",
 			Description: fmt.Sprintf("The command: %s did not succeed.", ssh_target_command),
 			Collected:   time.Now().Format(time.RFC3339),
-			Expires:     time.Now().AddDate(0, 1, 0).Format(time.RFC3339), // Add one month for the expiration
-			Links:       []*Link{},
-			Props: []*Property{
-				{
-					Name:  "Command",
-					Value: fmt.Sprintf("%s", ssh_target_command),
-				},
-			},
-			RelevantEvidence: []*Evidence{
-				{
-					Description: fmt.Sprintf("The command returned an exit code of %d for the command: %s", exit_code, ssh_target_command),
-				},
-			},
-			Remarks: fmt.Sprintf("The command: '%s' should return a zero exit code.", ssh_target_command),
-		}
-		fndngs = &Finding{
+			Expires:     time.Now().AddDate(0, 1, 0).Format(time.RFC3339),
+		})
+		findings = append(findings, &Finding{
 			Id:                  uuid.New().String(),
 			Title:               "SSH Command Failure",
 			Description:         fmt.Sprintf("The command %s did not succeed, and produced output: %s.", ssh_target_command, output),
-			Remarks:             fmt.Sprintf("Correct the command %s.", ssh_target_command),
 			RelatedObservations: []string{obs_id},
-		}
-		observations = append(observations, obs)
-		findings = append(findings, fndngs)
+		})
 	} else {
-		// observation only
-		obs = &Observation{
+		observations = append(observations, &Observation{
 			Id:          obs_id,
 			Title:       "SSH Command Succeeded",
 			Description: fmt.Sprintf("The command: %s succeeded.", ssh_target_command),
 			Collected:   time.Now().Format(time.RFC3339),
-			Expires:     time.Now().AddDate(0, 1, 0).Format(time.RFC3339), // Add one month for the expiration
-			Links:       []*Link{},
-			Props: []*Property{
-				{
-					Name:  "Command",
-					Value: fmt.Sprintf("%s", ssh_target_command),
-				},
-			},
-			RelevantEvidence: []*Evidence{
-				{
-					Description: fmt.Sprintf("The command returned an exit code of %d for the command: %s", exit_code, ssh_target_command),
-				},
-			},
-			Remarks: "All OK.",
-		}
-		observations = append(observations, obs)
+			Expires:     time.Now().AddDate(0, 1, 0).Format(time.RFC3339),
+		})
 	}
 
-	// Log that the check has successfully run
-	logEntry := &LogEntry{
-		Title:       "SSH Command Check",
-		Description: "SSH command check has run successfully",
-		Start:       start_time,
-		End:         time.Now().Format(time.RFC3339),
-	}
-
-	// Return the result
 	return &ExecuteResult{
 		Status:       ExecutionStatus_SUCCESS,
 		Observations: observations,
 		Findings:     findings,
-		Logs:         []*LogEntry{logEntry},
 	}, nil
 }
 
@@ -237,7 +186,9 @@ func RunCommand(config SSHConfig) (string, int, error) {
 }
 
 func main() {
-	Register(&SSHCommandProvider{
-		message: "Azure CLI provider completed",
-	})
+	provider := &SSHCommandProvider{
+		message:    "Azure CLI provider completed",
+		RunCommand: RunCommand,
+	}
+	Register(provider)
 }
