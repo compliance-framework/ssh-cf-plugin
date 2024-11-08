@@ -51,13 +51,13 @@ func (p *SSHCommandProvider) Evaluate(input *EvaluateInput) (*EvaluateResult, er
 
 	// There is only one subject, so create one
 	subjects := make([]*Subject, 0)
-	sshTargetId := fmt.Sprintf("%s@%s:%s %s", username, host, port, command)
+	sshTargetID := fmt.Sprintf("%s@%s:%s %s", username, host, port, command)
 	subjects = append(subjects, &Subject{
-		Id:    sshTargetId,
+		Id:    sshTargetID,
 		Type:  SubjectType_INVENTORY_ITEM,
-		Title: fmt.Sprintf("SSH target ssh %s", sshTargetId),
+		Title: fmt.Sprintf("SSH target ssh %s", sshTargetID),
 		Props: map[string]string{
-			"id": sshTargetId,
+			"id": sshTargetID,
 		},
 	})
 
@@ -93,12 +93,12 @@ func (p *SSHCommandProvider) Execute(input *ExecuteInput) (*ExecuteResult, error
 
 	observations := []*Observation{}
 	findings := []*Finding{}
-	obsId := uuid.New().String()
+	obsID := uuid.New().String()
 	sshTargetCommand := fmt.Sprintf("ssh -p %s %s@%s %s", sshConfig.Port, sshConfig.Username, sshConfig.Host, sshConfig.Command)
 
 	if exitCode != 0 {
 		observations = append(observations, &Observation{
-			Id:          obsId,
+			Id:          obsID,
 			Title:       "SSH Command Did Not Succeed",
 			Description: fmt.Sprintf("The command: %s did not succeed.", sshTargetCommand),
 			Collected:   time.Now().Format(time.RFC3339),
@@ -122,11 +122,11 @@ func (p *SSHCommandProvider) Execute(input *ExecuteInput) (*ExecuteResult, error
 			Title:               "SSH Command Failure",
 			Description:         fmt.Sprintf("The command %s did not succeed, and produced output: %s.", sshTargetCommand, output),
 			Remarks:             fmt.Sprintf("Correct the command %s.", sshTargetCommand),
-			RelatedObservations: []string{obsId},
+			RelatedObservations: []string{obsID},
 		})
 	} else {
 		observations = append(observations, &Observation{
-			Id:          obsId,
+			Id:          obsID,
 			Title:       "SSH Command Succeeded",
 			Description: fmt.Sprintf("The command: %s succeeded.", sshTargetCommand),
 			Collected:   time.Now().Format(time.RFC3339),
